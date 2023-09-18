@@ -24,13 +24,13 @@ namespace PKHeX.Core.AutoMod
         public static bool UseMarkings { get; set; } = true;
         public static bool EnableDevMode { get; set; } = false;
         public static string LatestAllowedVersion { get; set; } = "0.0.0.0";
-        public static bool UseXOROSHIRO { get; set; } = true;
         public static bool PrioritizeGame { get; set; } = true;
         public static GameVersion PrioritizeGameVersion { get; set; }
         public static bool SetBattleVersion { get; set; }
         public static bool AllowTrainerOverride { get; set; }
         public static bool AllowBatchCommands { get; set; } = true;
         public static bool ForceLevel100for50 { get; set; } = true;
+        public static bool AllowHOMETransferGeneration { get; set; } = true;
         public static int Timeout { get; set; } = 15;
 
         /// <summary>
@@ -65,7 +65,7 @@ namespace PKHeX.Core.AutoMod
 
             var abilityreq = GetRequestedAbility(template, set);
             var batchedit = AllowBatchCommands && regen.HasBatchSettings;
-            var native = ModLogic.NativeOnly && nativeOnly;
+            var native = ModLogic.cfg.NativeOnly && nativeOnly;
             var destType = template.GetType();
             var destVer = (GameVersion)dest.Game;
             if (destVer <= 0 && dest is SaveFile s)
@@ -126,6 +126,9 @@ namespace PKHeX.Core.AutoMod
                 if (EntityConverter.IsIncompatibleGB(pk, template.Japanese, pk.Japanese))
                     continue;
 
+                if (HomeTrackerUtil.IsRequired(enc, pk) && !AllowHOMETransferGeneration)
+                    continue;
+
                 // Apply final details
                 ApplySetDetails(pk, set, dest, enc, regen);
 
@@ -158,7 +161,7 @@ namespace PKHeX.Core.AutoMod
 
                 // Verify the Legality of what we generated, and exit if it is valid.
                 var la = new LegalityAnalysis(pk);
-                if (la.Valid)
+                if (la.Valid && pk.Species == set.Species) // Encounter Trades that evolve may cause higher tahn expected species
                 {
                     satisfied = LegalizationResult.Regenerated;
                     return pk;
@@ -826,7 +829,11 @@ namespace PKHeX.Core.AutoMod
             }
 
             // Handle mismatching abilities due to a PID re-roll
-            if (set.Ability == -1 || set.Ability == pk.Ability)
+            // Check against ability index because the pokemon could be a pre-evo at this point
+            if (pk.Ability != set.Ability)
+                pk.RefreshAbility(pk is PK5 { HiddenAbility: true } ? 2 : pk.AbilityNumber >> 1);
+            var ability_idx = GetRequiredAbilityIdx(pk, set);
+            if (set.Ability == -1 || set.Ability == pk.Ability || pk.AbilityNumber >> 1 == ability_idx || ability_idx == -1)
                 return;
 
             var abilitypref = enc.Ability;
@@ -1195,9 +1202,11 @@ namespace PKHeX.Core.AutoMod
             }
 
             var iterPKM = pk.Clone();
+            // Requested pokemon may be an evolution, guess index based on requested species ability
+            var ability_idx = GetRequiredAbilityIdx(iterPKM, set);
 
-            if (iterPKM.Ability != set.Ability && set.Ability != -1)
-                iterPKM.SetAbility(set.Ability >> 1);
+            if (iterPKM.AbilityNumber >> 1 != ability_idx && set.Ability != -1 && ability_idx != -1)
+                iterPKM.SetAbilityIndex(ability_idx);
             var count = 0;
             var isWishmaker = Method == PIDType.BACD_R && shiny && enc is WC3 { OT_Name: "WISHMKR" };
             var compromise = false;
@@ -1248,6 +1257,19 @@ namespace PKHeX.Core.AutoMod
                     continue;
                 break;
             } while (++count < 5_000_000);
+        }
+
+        private static int GetRequiredAbilityIdx(PKM pkm, IBattleTemplate set)
+        {
+            if (set.Ability == -1)
+                return -1;
+            var temp = pkm.Clone();
+            temp.Species = set.Species;
+            temp.SetAbilityIndex(pkm.AbilityNumber >> 1);
+            if (temp.Ability == set.Ability)
+                return -1;
+            var idx = temp.PersonalInfo.GetIndexOfAbility(set.Ability);
+            return idx;
         }
 
         /// <summary>

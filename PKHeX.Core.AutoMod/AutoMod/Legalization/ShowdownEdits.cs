@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using System.Reflection.Metadata.Ecma335;
 
 namespace PKHeX.Core.AutoMod
 {
@@ -67,6 +68,8 @@ namespace PKHeX.Core.AutoMod
         {
             if (pk.Ability != set.Ability)
                 pk.RefreshAbility(pk is PK5 { HiddenAbility: true } ? 2 : pk.AbilityNumber >> 1);
+            if (pk.Ability != set.Ability && pk.Context >= EntityContext.Gen8 && set.Ability != -1)
+                pk.RefreshAbility(pk is PK5 { HiddenAbility: true } ? 2 : pk.PersonalInfo.GetIndexOfAbility(set.Ability));
 
             if (preference <= 0)
                 return;
@@ -128,7 +131,7 @@ namespace PKHeX.Core.AutoMod
             }
 
             pk.SetSuggestedFormArgument(enc.Species);
-            if (evolutionRequired || formchange)
+            if (evolutionRequired || formchange || pk.Ability != set.Ability)
             {
                 var abilitypref = enc.Ability;
                 SetAbility(pk, set, abilitypref);
@@ -352,8 +355,26 @@ namespace PKHeX.Core.AutoMod
                 case Species.Palkia when pk.Form == 1 && pk.HeldItem != 1778:
                     pk.HeldItem = 1778;
                     break;
+                case Species.Ogerpon when pk.Form == 1 && pk.HeldItem != 2407:
+                    pk.HeldItem = 2407;
+                    break;
+                case Species.Ogerpon when pk.Form == 2 && pk.HeldItem != 2408:
+                    pk.HeldItem = 2408;
+                    break;
+                case Species.Ogerpon when pk.Form == 3 && pk.HeldItem != 2406:
+                    pk.HeldItem = 2406;
+                    break;
             }
         }
+
+        public static MoveType GetValidOpergonTeraType(byte form) => (form & 3) switch
+        {
+            0 => MoveType.Grass,
+            1 => MoveType.Water,
+            2 => MoveType.Fire,
+            3 => MoveType.Rock,
+            _ => (MoveType)TeraTypeUtil.OverrideNone,
+        };
 
         /// <summary>
         /// Randomizes the IVs within game constraints.
